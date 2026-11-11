@@ -5,7 +5,7 @@ export type PreviewMode = 'animated' | 'static';
 export type PreviewBg = 'checker' | 'light' | 'dark';
 
 /** Set to the project's repository URL to show the GitHub link in the top bar. */
-export const REPO_URL = '';
+export const REPO_URL = 'https://github.com/Andrew-Velox/SignFlow';
 
 const INK_DEFAULT: Record<Theme, string> = { light: '#171717', dark: '#f2f2f2' };
 const PEN_DEFAULTS = { width: 4.5, smoothing: 0.5, velocity: 0.35, pressure: 0.7, taper: 0.5, variable: true, refine: false } as const;

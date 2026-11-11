@@ -26,6 +26,6 @@ A full-screen dot-grid canvas with floating controls: top bar (theme, export), b
 | `E` | Open export |
 | `Esc` | Close export |
 
-To show a GitHub link in the top bar, set `REPO_URL` in `apps/web/src/stores/editor.svelte.ts`.
+The top bar links to the repository via `REPO_URL` in `apps/web/src/stores/editor.svelte.ts` (set it to an empty string to hide the link).
 
 MIT licensed.
