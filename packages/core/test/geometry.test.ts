@@ -7,6 +7,7 @@ import {
   bezierSecondDerivative,
   bezierTangent,
   catmullRomToBezier,
+  cubicBSplineToBezier,
   formatNumber,
   lineToBezier,
   midpointSplineToBezier,
@@ -226,5 +227,64 @@ describe('midpointSplineToBezier', () => {
     expect(midpointSplineToBezier([])).toEqual([]);
     expect(midpointSplineToBezier([{ x: 1, y: 1 }])).toEqual([]);
     expect(midpointSplineToBezier(pts.slice(0, 2))).toHaveLength(1);
+  });
+});
+
+describe('cubicBSplineToBezier', () => {
+  const pts = [
+    { x: 0, y: 0 },
+    { x: 10, y: 4 },
+    { x: 22, y: 3 },
+    { x: 31, y: 12 },
+    { x: 33, y: 25 },
+    { x: 40, y: 30 },
+    { x: 52, y: 28 },
+  ];
+
+  it('starts and ends exactly on the first and last point, as a contiguous chain', () => {
+    const segs = cubicBSplineToBezier(pts);
+    expect(segs[0].p0).toEqual(pts[0]);
+    const end = segs[segs.length - 1].p3;
+    expect(end.x).toBeCloseTo(pts[pts.length - 1].x, 9);
+    expect(end.y).toBeCloseTo(pts[pts.length - 1].y, 9);
+    for (let i = 0; i < segs.length - 1; i++) {
+      expect(segs[i].p3.x).toBeCloseTo(segs[i + 1].p0.x, 9);
+      expect(segs[i].p3.y).toBeCloseTo(segs[i + 1].p0.y, 9);
+    }
+  });
+
+  it('is C2: tangent AND curvature vector continuous at every join', () => {
+    const segs = cubicBSplineToBezier(pts);
+    for (let i = 0; i < segs.length - 1; i++) {
+      const a = segs[i];
+      const b = segs[i + 1];
+      // C1: matching first derivative (3·(p3 − p2) = 3·(q1 − q0)).
+      expect(a.p3.x - a.p2.x).toBeCloseTo(b.p1.x - b.p0.x, 9);
+      expect(a.p3.y - a.p2.y).toBeCloseTo(b.p1.y - b.p0.y, 9);
+      // C2: matching second derivative (6·(p1 − 2·p2 + p3)).
+      const sa = { x: a.p1.x - 2 * a.p2.x + a.p3.x, y: a.p1.y - 2 * a.p2.y + a.p3.y };
+      const sb = { x: b.p0.x - 2 * b.p1.x + b.p2.x, y: b.p0.y - 2 * b.p1.y + b.p2.y };
+      expect(sa.x).toBeCloseTo(sb.x, 9);
+      expect(sa.y).toBeCloseTo(sb.y, 9);
+    }
+  });
+
+  it('is local: appending a point only changes the last three segments', () => {
+    const before = cubicBSplineToBezier(pts.slice(0, 6));
+    const after = cubicBSplineToBezier(pts);
+    for (let i = 0; i < before.length - 3; i++) expect(after[i]).toEqual(before[i]);
+  });
+
+  it('averages out jitter instead of tracing it', () => {
+    const zig = Array.from({ length: 30 }, (_, i) => ({ x: i * 4, y: i % 2 ? 1 : -1 }));
+    const segs = cubicBSplineToBezier(zig);
+    const mid = segs.slice(5, -5).flatMap((s) => [s.p0.y, s.p3.y]);
+    expect(Math.max(...mid.map(Math.abs))).toBeLessThan(0.5); // input swings ±1
+  });
+
+  it('handles tiny inputs', () => {
+    expect(cubicBSplineToBezier([])).toEqual([]);
+    expect(cubicBSplineToBezier([{ x: 1, y: 1 }])).toEqual([]);
+    expect(cubicBSplineToBezier(pts.slice(0, 2)).length).toBeGreaterThan(0);
   });
 });

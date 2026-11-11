@@ -5,6 +5,8 @@ export interface WidthParams {
   hasPressure: boolean;
   pressureSensitivity: number;
   velocitySensitivity: number;
+  /** 0..1: how much tight bends thicken the stroke. */
+  curvature: number;
   taper: number;
 }
 
@@ -15,7 +17,15 @@ const SPEED_DEFAULT = 700;
 /** Length (px) of the end taper at taper = 1. */
 const TAPER_LENGTH = 26;
 /** Max change of relative width per px of arc length (before taper). */
-export const MAX_WIDTH_SLOPE = 0.03;
+export const MAX_WIDTH_SLOPE = 0.04;
+/** Half-width (px of arc length) of the window the bend is measured over. */
+const BEND_WINDOW = 9;
+/** Curvature (rad per px) at which the bend effect is fully on: radius ≈ 40 px, i.e. every real bend of a signature. */
+const BEND_FULL = 1 / 40;
+/** At curvature = 1: extra relative width on a full bend... */
+const BEND_GAIN = 0.9;
+/** ...and how much thinner a straight run gets. The contrast comes from both sides, so average weight stays put. */
+const STRAIGHT_THIN = 0.3;
 const MIN_WIDTH = 0.12;
 const MAX_WIDTH = 1.9;
 
@@ -63,6 +73,11 @@ export function computeWidthProfile(points: readonly InputPoint[], params: Width
 
   // Thickness may only change so fast per px of pen travel (cf. Atrament's stepped
   // thickness): kills pulsing from noisy speed/pressure without needing heavy blur.
+  if (params.curvature > 0) {
+    const bend = bendProfile(points, arc);
+    for (let i = 0; i < n; i++) factor[i] *= 1 - params.curvature * STRAIGHT_THIN + params.curvature * (STRAIGHT_THIN + BEND_GAIN) * bend[i];
+  }
+
   const smoothed = limitSlope(blur(factor, 3), arc, MAX_WIDTH_SLOPE);
 
   if (params.taper > 0) {
@@ -78,7 +93,37 @@ export function computeWidthProfile(points: readonly InputPoint[], params: Width
   }
 
   const samples: WidthSample[] = smoothed.map((w, i) => ({ u: arc[i] / total, w: clamp(w, MIN_WIDTH, MAX_WIDTH) }));
-  return simplifyProfile(samples, 0.02);
+  return simplifyProfile(samples, 0.04);
+}
+
+/**
+ * 0..1 per sample: how tightly the path bends there. Measured as the turning
+ * angle between the chords `BEND_WINDOW` px behind and ahead, per px of arc
+ * length. A fixed arc-length window makes it independent of how densely the
+ * pointer was sampled and robust against ±1 px jitter. Near the ends, where
+ * a full window does not fit, there is no bend.
+ */
+function bendProfile(points: readonly InputPoint[], arc: readonly number[]): number[] {
+  const n = points.length;
+  const out = new Array<number>(n).fill(0);
+  let a = 0;
+  let b = 0;
+  for (let i = 1; i < n - 1; i++) {
+    while (a < i - 1 && arc[i] - arc[a + 1] >= BEND_WINDOW) a++;
+    if (b < i) b = i;
+    while (b < n - 1 && arc[b] - arc[i] < BEND_WINDOW) b++;
+    if (arc[i] - arc[a] < BEND_WINDOW * 0.75 || arc[b] - arc[i] < BEND_WINDOW * 0.75) continue;
+    const ux = points[i].x - points[a].x;
+    const uy = points[i].y - points[a].y;
+    const vx = points[b].x - points[i].x;
+    const vy = points[b].y - points[i].y;
+    const lu = Math.hypot(ux, uy);
+    const lv = Math.hypot(vx, vy);
+    if (lu < 1e-9 || lv < 1e-9) continue;
+    const angle = Math.acos(Math.max(-1, Math.min(1, (ux * vx + uy * vy) / (lu * lv))));
+    out[i] = smoothstep(angle / (arc[b] - arc[a]) / BEND_FULL);
+  }
+  return out;
 }
 
 /** Forward + backward slew-rate clamp: the result is Lipschitz with constant `maxSlope` per unit of `arc`. */

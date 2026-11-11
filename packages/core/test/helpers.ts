@@ -162,3 +162,25 @@ export function penWalk(seed: number): InputPoint[] {
   }
   return pts;
 }
+
+/** Nearest-sample distance through a spatial hash (8 px cells): O(1) per query instead of O(n). */
+export function nearestDistance(samples: readonly Vec2[], reach = 60): (q: Vec2) => number {
+  const cells = new Map<string, Vec2[]>();
+  const key = (x: number, y: number) => `${Math.floor(x / 8)},${Math.floor(y / 8)}`;
+  for (const p of samples) {
+    const k = key(p.x, p.y);
+    const list = cells.get(k);
+    if (list) list.push(p);
+    else cells.set(k, [p]);
+  }
+  const c = Math.ceil(reach / 8) + 1;
+  return (q) => {
+    let best = Infinity;
+    const cx = Math.floor(q.x / 8);
+    const cy = Math.floor(q.y / 8);
+    for (let i = -c; i <= c; i++)
+      for (let j = -c; j <= c; j++)
+        for (const p of cells.get(`${cx + i},${cy + j}`) ?? []) best = Math.min(best, Math.hypot(p.x - q.x, p.y - q.y));
+    return best === Infinity ? reach * 10 : best;
+  };
+}

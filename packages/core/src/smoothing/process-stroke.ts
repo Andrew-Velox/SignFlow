@@ -101,6 +101,7 @@ export function refineStroke(raw: RawStroke, userOptions: Partial<ProcessOptions
       hasPressure: strokeHasPressure(raw),
       pressureSensitivity: o.pressureSensitivity,
       velocitySensitivity: o.velocitySensitivity,
+      curvature: o.curvature,
       taper: o.taper,
     }),
     length: segmentsLength(segments),

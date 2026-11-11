@@ -21,6 +21,7 @@ import {
   loopsCurve,
   maxDeviation,
   meanDeviation,
+  nearestDistance,
   polylineFromFn,
   rawStroke,
   penWalk,
@@ -227,7 +228,7 @@ describe('pressure and width profile', () => {
 
   it('ignores pressure sensitivity for a mouse', () => {
     const pts = samplePath(path, { pressure: (u) => 0.15 + 0.7 * u });
-    const s = processStroke(rawStroke(pts, 'mouse'), { pressureSensitivity: 1, velocitySensitivity: 0, taper: 0 });
+    const s = processStroke(rawStroke(pts, 'mouse'), { pressureSensitivity: 1, velocitySensitivity: 0, curvature: 0, taper: 0 });
     expect(s.widthProfile.every((w) => Math.abs(w.w - 1) < 1e-9)).toBe(true);
   });
 
@@ -247,7 +248,7 @@ describe('pressure and width profile', () => {
 
   it('keeps the profile small', () => {
     const s = processStroke(rawStroke(mouse));
-    expect(s.widthProfile.length).toBeLessThan(mouse.length / 4);
+    expect(s.widthProfile.length).toBeLessThan(mouse.length / 2);
     expect(s.widthProfile[0].u).toBe(0);
     expect(s.widthProfile[s.widthProfile.length - 1].u).toBeCloseTo(1, 9);
   });
@@ -281,11 +282,55 @@ describe('pressure and width profile', () => {
   });
 });
 
+describe('curvature-driven width', () => {
+  // Straight run, one tight loop, straight run: all drawn at one constant speed, so only the bend can change width.
+  const path = [
+    ...polylineFromFn((t) => ({ x: 20 + 160 * t, y: 120 }), 80),
+    ...polylineFromFn((t) => ({ x: 180 + 18 * Math.sin(t * Math.PI * 2), y: 120 - 18 + 18 * Math.cos(t * Math.PI * 2) }), 90),
+    ...polylineFromFn((t) => ({ x: 180 + 160 * t, y: 120 }), 80),
+  ];
+  const pts = samplePath(path, { seed: 4, noise: 0.2, speed: 500 });
+  const flat = { velocitySensitivity: 0, pressureSensitivity: 0, taper: 0 };
+
+  it('makes bends thicker than straight runs', () => {
+    const s = processStroke(rawStroke(pts), { ...flat, curvature: 1 });
+    const straight = widthAt(s.widthProfile, 0.1);
+    const bend = Math.max(...s.widthProfile.map((w) => w.w));
+    expect(straight).toBeLessThan(1.1);
+    expect(bend).toBeGreaterThan(straight * 1.3);
+  });
+
+  it('is off at curvature = 0', () => {
+    const s = processStroke(rawStroke(pts), { ...flat, curvature: 0 });
+    expect(s.widthProfile.every((w) => Math.abs(w.w - 1) < 1e-9)).toBe(true);
+  });
+
+  it('scales with the setting', () => {
+    const peak = (curvature: number) => Math.max(...processStroke(rawStroke(pts), { ...flat, curvature }).widthProfile.map((w) => w.w));
+    expect(peak(0.3)).toBeLessThan(peak(0.6));
+    expect(peak(0.6)).toBeLessThan(peak(1));
+  });
+
+  it('does not depend on how fast the pen moves', () => {
+    const at = (speed: number) => {
+      const s = processStroke(rawStroke(samplePath(path, { seed: 4, noise: 0.2, speed })), { ...flat, curvature: 1 });
+      return Math.max(...s.widthProfile.map((w) => w.w));
+    };
+    expect(Math.abs(at(300) - at(900))).toBeLessThan(0.2);
+  });
+
+  it('leaves a perfectly straight stroke alone', () => {
+    const straight = samplePath(polylineFromFn((t) => ({ x: 20 + 300 * t, y: 60 }), 100), { seed: 1, noise: 0.2, speed: 500 });
+    const s = processStroke(rawStroke(straight), { ...flat, curvature: 1 });
+    expect(Math.max(...s.widthProfile.map((w) => w.w))).toBeLessThan(1.1);
+  });
+});
+
 describe('strokeToOutline', () => {
   const straight = rawStroke(
     Array.from({ length: 60 }, (_, i) => ({ x: 20 + i * 4, y: 50, t: i * 8, pressure: 0.5 })),
   );
-  const flat = { velocitySensitivity: 0, taper: 0, smoothing: 0.3 };
+  const flat = { velocitySensitivity: 0, curvature: 0, taper: 0, smoothing: 0.3 };
 
   const outlineBounds = (segs: ReturnType<typeof strokeToOutline>): Bounds =>
     segs.map(bezierBounds).reduce<Bounds | null>((a, b) => unionBounds(a, b), null)!;
@@ -462,13 +507,11 @@ describe('outline spikes at sharp turns (regression)', () => {
   const LIMIT = (BASE * 1.9) / 2 + 2.5;
 
   const maxStray = (stroke: ReturnType<typeof processStroke>, quality: 'live' | 'final') => {
-    const center = sampleSegments(stroke.segments, 24);
+    const near = nearestDistance(sampleSegments(stroke.segments, 40));
     let worst = 0;
     for (const p of sampleSegments(strokeToOutline(stroke, BASE, quality), 4)) {
       if (!Number.isFinite(p.x + p.y)) return Infinity;
-      let best = Infinity;
-      for (const c of center) best = Math.min(best, Math.hypot(p.x - c.x, p.y - c.y));
-      worst = Math.max(worst, best);
+      worst = Math.max(worst, near(p));
     }
     return worst;
   };

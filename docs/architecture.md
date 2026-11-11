@@ -22,9 +22,9 @@ Changing smoothing later re-derives from raw, so it is never lossy.
 ```
 pointer samples
  -> One Euro filter (causal, time-based; speed estimate seeded from the first delta)
- -> drop sub-threshold jitter
- -> quadratic midpoint B-spline            <- this is the live ink
- -> width profile: pressure x speed x taper, slope-limited
+ -> resample to evenly spaced control points (every 2-5 px of path)
+ -> uniform cubic B-spline (C2 smooth)       <- this is the live ink
+ -> width profile: pressure x speed x curvature x taper, slope-limited
  -> on release: compactSegments() re-fits the *same* curve within 0.2 px   <- the final stroke
  -> strokeToOutline(): variable-width closed outline for fill
 ```
@@ -50,8 +50,9 @@ Live frames draw the outline with `quality: 'live'` (dense offset polyline,
 | One Euro filter | EMA, moving average, Kalman | Adaptive: heavy smoothing when slow (jitter), almost none when fast (lag). With `beta = 1/featureScale`, details larger than `featureScale` px survive at any speed and lag is bounded by ~featureScale/2π px. One slider maps to that single length. |
 | Zero-phase (forward+backward), only with `refine` | Causal only | Removes the pen-trailing delay. Not free: amplitude is attenuated like \|H\|², so parameters are tuned for that. Speed is estimated once, non-causally, so both passes use identical cutoffs. |
 | Schneider fitting | Catmull-Rom through all samples, B-spline | Interpolating splines reproduce the noise and need one segment per sample. Fitting gives ~1 segment per 7-30 samples under a hard pixel tolerance, G1 at splits. |
-| Midpoint B-spline for live preview | Catmull-Rom | Approximates instead of interpolating, so residual jitter is averaged out. Measured on the synthetic set (true-path roughness 0.131): live roughness 0.143-0.160 vs 0.173-0.206 for Catmull-Rom, mean error ~0.38 vs ~0.42 px. Still local and C1. |
-| Width slope limit (0.03 / px) | Blur only | Inspired by Atrament's stepped thickness, but per px of travel so it is independent of event rate. Thickness cannot pulse from noisy speed/pressure. |
+| Resampled cubic B-spline for live preview | Catmull-Rom, quadratic midpoint spline | Approximates instead of interpolating, so residual jitter is averaged out. Even spacing makes smoothing depend on distance, not pointer speed; the B-spline is C2 and averages three neighbours. Measured on the synthetic set (600 px/s, smoothing 0.5): roughness error 0.0078 vs 0.0167 for the quadratic midpoint spline and ~0.03 for Catmull-Rom, at the same ~0.38 px mean error; 0.91 vs 1.04 px at 1400 px/s. Local (last three segments change) and the final stroke is within 0.2 px of it. |
+| Curvature-driven width | Speed only | Heavier on bends, lighter on straights (Atrament-like ink pooling), regardless of pointer speed. Bend = turning angle between chords 9 px behind/ahead per px of arc length, so it does not depend on sampling density. Full effect at radius 40 px. |
+| Width slope limit (0.04 / px) | Blur only | Inspired by Atrament's stepped thickness, but per px of travel so it is independent of event rate. Thickness cannot pulse from noisy speed/pressure. |
 | Corner split before smoothing | Smooth everything | Prevents rounding deliberate cusps. Detection uses a fixed arc-length arm, so it is independent of sampling rate and tolerant of ±1 px jitter. |
 | Filled outline for variable width | Constant-width `stroke` | SVG strokes cannot vary in width. Phase 3 will reveal the outline with a dash-animated centre-line mask so playback still follows the real pen path. |
 | Width from speed even for mouse | Pressure only | Gives mouse signatures an inked look; pressure is used on top when the device actually reports it. |

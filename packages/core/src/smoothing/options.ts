@@ -10,6 +10,8 @@ export interface ProcessOptions {
   pressureSensitivity: number;
   /** 0..1: how much writing speed thins the line (fast = thin), simulating ink pens. Works for mouse too. */
   velocitySensitivity: number;
+  /** 0..1: how much bends thicken the line (ink pools where the pen turns). Works for every device. */
+  curvature: number;
   /** 0..1: length/strength of the tapered start and end of each stroke. */
   taper: number;
   /**
@@ -26,6 +28,7 @@ export const DEFAULT_OPTIONS: Readonly<ProcessOptions> = Object.freeze({
   cornerAngle: 62,
   pressureSensitivity: 0.7,
   velocitySensitivity: 0.35,
+  curvature: 0.7,
   taper: 0.5,
   refine: false,
 });
@@ -42,6 +45,8 @@ export interface ResolvedSmoothing {
   fitTolerance: number;
   /** Arc-length lever arm (px) for corner detection. */
   cornerWindow: number;
+  /** Spacing (px) of the control points the live curve is built from. */
+  resampleSpacing: number;
 }
 
 /**
@@ -64,6 +69,7 @@ export function resolveSmoothing(smoothing: number): ResolvedSmoothing {
     minPointDistance: lerp(0.6, 2.6, s),
     fitTolerance: lerp(0.18, 2.2, s),
     cornerWindow: lerp(5, 9, s),
+    resampleSpacing: lerp(2, 5, s),
   };
 }
 
@@ -80,6 +86,7 @@ export function resolveOptions(user: Partial<ProcessOptions> = {}): ProcessOptio
   o.smoothing = clamp01(o.smoothing);
   o.pressureSensitivity = clamp01(o.pressureSensitivity);
   o.velocitySensitivity = clamp01(o.velocitySensitivity);
+  o.curvature = clamp01(o.curvature);
   o.taper = clamp01(o.taper);
   return o;
 }

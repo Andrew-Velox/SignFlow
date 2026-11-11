@@ -49,7 +49,8 @@
 
   <section>
     <h3>Stroke shape</h3>
-    <Switch label="Variable width" hint="Taper and thin with speed, like ink" bind:checked={editor.variable} />
+    <Switch label="Variable width" hint="Thicker on bends, thinner when fast" bind:checked={editor.variable} />
+    <Slider label="Curve weight" bind:value={editor.curvature} min={0} max={1} step={0.01} format={pct} disabled={!editor.variable} />
     <Slider label="Speed thinning" bind:value={editor.velocity} min={0} max={1} step={0.01} format={pct} disabled={!editor.variable} />
     <Slider label="Pressure" bind:value={editor.pressure} min={0} max={1} step={0.01} format={pct} disabled={!editor.variable} />
     <Slider label="Taper" bind:value={editor.taper} min={0} max={1} step={0.01} format={pct} disabled={!editor.variable} />
