@@ -1,0 +1,18 @@
+{
+  "name": "signflow",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Draw naturally. Animate beautifully. Export anywhere.",
+  "license": "MIT",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @signflow/web",
+    "build": "npm run build -w @signflow/web",
+    "test": "npm test -w @signflow/core -w @signflow/svg",
+    "typecheck": "npm run typecheck -w @signflow/core -w @signflow/svg -w @signflow/web"
+  }
+}

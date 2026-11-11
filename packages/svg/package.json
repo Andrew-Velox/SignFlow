@@ -1,0 +1,16 @@
+{
+  "name": "@signflow/svg",
+  "version": "0.0.0",
+  "description": "Standalone SVG generation for SignFlow strokes: no DOM, no dependencies besides @signflow/core.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@signflow/core": "*"
+  }
+}

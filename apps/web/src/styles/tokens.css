@@ -1,0 +1,62 @@
+/* Neutral graphite ramp. The canvas grey and dot grid come from the reference. Colour lives in the ink. */
+:root,
+:root[data-theme='light'] {
+  --canvas: #f1f1f1;
+  --dot: #c4c4c4;
+  --surface: #ffffff;
+  --raised: #f4f4f5;
+  --text: #171717;
+  --text-2: #525252;
+  --muted: #737373;
+  --hair: rgba(23, 23, 23, 0.08);
+  --hair-strong: rgba(23, 23, 23, 0.16);
+  --primary: #171717;
+  --on-primary: #ffffff;
+  --focus: #2f54d6;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-float: 0 1px 2px rgba(0, 0, 0, 0.05), 0 8px 24px rgba(0, 0, 0, 0.06);
+  --danger: #dc2626;
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  --canvas: #141415;
+  --dot: #2e2e31;
+  --surface: #19191b;
+  --raised: #232325;
+  --text: #ededed;
+  --text-2: #a1a1a6;
+  --muted: #85858b;
+  --hair: rgba(237, 237, 237, 0.08);
+  --hair-strong: rgba(237, 237, 237, 0.16);
+  --primary: #ededed;
+  --on-primary: #141415;
+  --focus: #8aa4ff;
+  --shadow-sm: none;
+  --shadow-float: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --danger: #e5484d;
+  color-scheme: dark;
+}
+
+:root {
+  --font: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+
+  /* Radius: control 8, keycap 4, panel 14. Inner = outer minus padding. */
+  --r-key: 4px;
+  --r-control: 8px;
+  --r-panel: 14px;
+
+  /* One easing curve, a few durations. */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --t-fast: 150ms;
+  --t-pop: 200ms;
+  --t-sheet: 300ms;
+
+  --top: 16px; /* gap from the viewport edge to floating UI */
+  --hit: 36px; /* interactive control size; 44px on touch screens */
+  --edge-l: max(var(--top), env(safe-area-inset-left, 0px));
+  --edge-r: max(var(--top), env(safe-area-inset-right, 0px));
+  --edge-t: max(var(--top), env(safe-area-inset-top, 0px));
+  --edge-b: max(var(--top), env(safe-area-inset-bottom, 0px));
+}
