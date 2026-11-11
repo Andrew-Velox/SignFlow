@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { processStroke, type InputPoint, type Stroke } from '@signflow/core';
-import { buildAnimatedSvg, buildTimeline, resolveAnimation, sanitizeEasing, DOT_MS, MIN_STROKE_MS } from '../src';
+import { buildAnimatedSvg, buildTimeline, easingInverse, resolveAnimation, sanitizeEasing, DOT_MS, MIN_STROKE_MS } from '../src';
 
 function line(x0: number, y0: number, x1: number, y1: number, id: string, n = 40): Stroke {
   const points: InputPoint[] = Array.from({ length: n + 1 }, (_, i) => ({
@@ -72,7 +72,7 @@ describe('buildAnimatedSvg', () => {
     expect(svg).toContain('@keyframes sf-k0');
     expect(svg).not.toMatch(/<script|href=|<image|<foreignObject|onload|javascript:|@import|<animate/i);
     // Only same-document references (the masks).
-    for (const m of svg.matchAll(/url\(([^)]*)\)/g)) expect(m[1]).toMatch(/^#sf-m\d+$/);
+    for (const m of svg.matchAll(/url\(([^)]*)\)/g)) expect(m[1]).toMatch(/^#sf-m\d+(-\d+)?$/);
   });
 
   it('starts strokes in the original order', () => {
@@ -96,9 +96,9 @@ describe('buildAnimatedSvg', () => {
 
   it('variable width: outlines are revealed through masks that hold the animated centre line', () => {
     const { svg } = buildAnimatedSvg({ ...base, variableWidth: true });
-    expect(svg.match(/<mask /g)).toHaveLength(2); // the dot has no mask
-    expect(svg).toContain('mask="url(#sf-m0)"');
-    expect(svg).toMatch(/<mask id="sf-m0"[^>]*><path class="sf-a0"[^>]*stroke="#fff"/);
+    expect(svg.match(/<mask /g)!.length).toBeGreaterThanOrEqual(2); // at least one per stroke; the dot has none
+    expect(svg).toContain('mask="url(#sf-m0-0)"');
+    expect(svg).toMatch(/<mask id="sf-m0-0"[^>]*><path class="sf-a0-0"[^>]*stroke="#fff"/);
     expect(svg).not.toMatch(/stroke-linecap/); // butt caps in the mask: the reveal edge is a clean cut
   });
 
@@ -131,9 +131,10 @@ describe('buildAnimatedSvg', () => {
     expect(cycles.size).toBe(1);
   });
 
-  it('uses the requested easing inside the keyframes', () => {
-    expect(buildAnimatedSvg({ ...base, easing: 'linear' }).svg).toContain('animation-timing-function:linear');
-    expect(buildAnimatedSvg({ ...base, easing: 'bad;}' }).svg).toContain('animation-timing-function:ease-in-out');
+  it('constant width: the requested easing is applied inside the stroke keyframes', () => {
+    const c = { ...base, variableWidth: false };
+    expect(buildAnimatedSvg({ ...c, easing: 'linear' }).svg).toContain('animation-timing-function:linear');
+    expect(buildAnimatedSvg({ ...c, easing: 'bad;}' }).svg).toContain('animation-timing-function:ease-in-out');
   });
 
   it('total drawing time follows the duration option', () => {
@@ -164,5 +165,97 @@ describe('buildAnimatedSvg', () => {
   it('survives non-finite options', () => {
     const r = buildAnimatedSvg({ ...base, duration: NaN, strokeDelay: Infinity, startDelay: -5, easing: undefined });
     expect(r.svg).not.toMatch(/NaN|Infinity|undefined/);
+  });
+});
+
+/** (start %, end %) of every slice of stroke `i`, from the keyframes in the file. */
+function slices(svg: string, i: number): [number, number][] {
+  const out: [number, number][] = [];
+  for (const m of svg.matchAll(new RegExp(`@keyframes sf-k${i}-(\\d+)\\{(?:0%\\{[^}]*\\})?([\\d.]+)%\\{[^}]*\\}([\\d.]+)%\\{`, 'g'))) out[+m[1]] = [+m[2], +m[3]];
+  return out;
+}
+
+describe('variable width reveals slice by slice (no ink ahead of the pen)', () => {
+  const v = { ...base, variableWidth: true, easing: 'linear' };
+
+  it('cuts a long stroke into several slices, each with its own mask, and a short one into one', () => {
+    const { svg } = buildAnimatedSvg(v);
+    expect(slices(svg, 0).length).toBeGreaterThan(3);
+    expect(svg).toMatch(/<mask id="sf-m0-0">/);
+    expect(svg).toMatch(/<mask id="sf-m0-1">/);
+    const tiny = line(100, 100, 130, 105, 't', 8);
+    expect(buildAnimatedSvg({ ...v, strokes: [tiny] }).svg).toMatch(/<mask id="sf-m0">/); // one slice: unsuffixed
+  });
+
+  it('pairs every outline with exactly its own mask', () => {
+    const { svg } = buildAnimatedSvg(v);
+    const used = [...svg.matchAll(/mask="url\(#(sf-m[\d-]+)\)"/g)].map((m) => m[1]);
+    const defined = [...svg.matchAll(/<mask id="(sf-m[\d-]+)"/g)].map((m) => m[1]);
+    expect(new Set(used).size).toBe(used.length); // no mask shared between two outlines
+    expect(used.sort()).toEqual(defined.sort());
+  });
+
+  it('slices are revealed in path order, back to back, covering the whole stroke time', () => {
+    const r = buildAnimatedSvg(v);
+    const sl = slices(r.svg, 0);
+    for (let k = 1; k < sl.length; k++) expect(sl[k][0]).toBeGreaterThanOrEqual(sl[k - 1][0] - 1e-6);
+    for (const [a, b] of sl) expect(b).toBeGreaterThanOrEqual(a);
+    const pct = (ms: number) => (ms / r.cycle) * 100;
+    expect(sl[0][0]).toBeCloseTo(pct(r.timeline.starts[0]), 2);
+    expect(sl[sl.length - 1][1]).toBeCloseTo(pct(r.timeline.ends[0]), 2);
+  });
+
+  it('under linear easing every interior slice takes about the same time; under ease-in-out the ends are slower', () => {
+    const lin = slices(buildAnimatedSvg(v).svg, 0).map(([a, b]) => b - a);
+    const mid = lin.slice(2, -2);
+    expect(Math.max(...mid) / Math.min(...mid)).toBeLessThan(1.5);
+    const eased = slices(buildAnimatedSvg({ ...v, easing: 'ease-in-out' }).svg, 0).map(([a, b]) => b - a);
+    expect(eased[0]).toBeGreaterThan(eased[Math.floor(eased.length / 2)] * 1.3);
+  });
+
+  it('chunkLength: 0 restores a single mask per stroke', () => {
+    const { svg } = buildAnimatedSvg({ ...v, chunkLength: 0 });
+    expect(svg.match(/<mask /g)).toHaveLength(2);
+    expect(svg).toContain('mask="url(#sf-m0)"');
+  });
+
+  it('the default (un-animated) state is still the full drawing', () => {
+    const { svg } = buildAnimatedSvg(v);
+    const noKeyframes = svg.replace(/@keyframes [\w-]+\{(?:[^{}]*\{[^}]*\})*\}/g, '');
+    expect(noKeyframes).not.toMatch(/stroke-dashoffset/);
+  });
+});
+
+describe('easingInverse', () => {
+  it('is the identity for linear and respects the bounds', () => {
+    const f = easingInverse('linear');
+    expect(f(0)).toBe(0);
+    expect(f(0.3)).toBeCloseTo(0.3, 12);
+    expect(f(1)).toBe(1);
+    expect(f(-1)).toBe(0);
+    expect(f(2)).toBe(1);
+  });
+
+  it('inverts the standard curves: monotonic, symmetric for ease-in-out, slow at the ends', () => {
+    for (const e of ['ease', 'ease-in', 'ease-out', 'ease-in-out', 'cubic-bezier(0.3,0.1,0.6,0.9)']) {
+      const f = easingInverse(e);
+      let prev = -1;
+      for (let i = 0; i <= 20; i++) {
+        const v = f(i / 20);
+        expect(v).toBeGreaterThanOrEqual(prev - 1e-9);
+        prev = v;
+      }
+      expect(f(0)).toBeCloseTo(0, 6);
+      expect(f(1)).toBeCloseTo(1, 6);
+    }
+    expect(easingInverse('ease-in-out')(0.5)).toBeCloseTo(0.5, 6);
+    // ease-in starts slowly, so the first 10 % of the path takes more than 10 % of the time.
+    expect(easingInverse('ease-in')(0.1)).toBeGreaterThan(0.2);
+  });
+
+  it('only accepts monotonic custom curves', () => {
+    expect(sanitizeEasing('cubic-bezier(0.4,2,0.2,1)')).toBe('ease-in-out');
+    expect(sanitizeEasing('cubic-bezier(0.4,-1,0.2,1)')).toBe('ease-in-out');
+    expect(sanitizeEasing('cubic-bezier(0.4,0.2,0.2,1)')).toBe('cubic-bezier(0.4,0.2,0.2,1)');
   });
 });

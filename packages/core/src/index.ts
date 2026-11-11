@@ -11,7 +11,7 @@ export { processStroke } from './process';
 export { refineStroke, prepareInput, strokeBounds, strokeHasPressure } from './smoothing/process-stroke';
 export { compactSegments, COMPACT_TOLERANCE } from './smoothing/compact';
 export { strokeToOutline } from './outline/outline';
-export type { OutlineQuality } from './outline/outline';
+export type { OutlineQuality, OutlineCaps } from './outline/outline';
 export { strokeCenterlinePath, strokeOutlinePath, outlineToPath } from './outline/path';
 export { StrokeBuilder } from './input/stroke-builder';
 export { PointerRecorder } from './input/pointer-recorder';

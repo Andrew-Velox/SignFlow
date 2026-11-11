@@ -30,7 +30,18 @@ interface Sample {
  * and close with round caps. Hard corners get a bevel on the outer side and
  * a harmless overlap on the inner side (non-zero fill).
  */
-export function strokeToOutline(stroke: Stroke, baseWidth: number, quality: OutlineQuality = 'final'): CubicBezier[] {
+export interface OutlineCaps {
+  /** `round` (default) is a half circle, `butt` a flat cut across the pen path (for joining slices end to end). */
+  start?: 'round' | 'butt';
+  end?: 'round' | 'butt';
+}
+
+export function strokeToOutline(
+  stroke: Stroke,
+  baseWidth: number,
+  quality: OutlineQuality = 'final',
+  caps: OutlineCaps = {},
+): CubicBezier[] {
   if (stroke.segments.length === 0) return [];
   if (stroke.isDot) {
     const c = stroke.segments[0].p0;
@@ -66,7 +77,8 @@ export function strokeToOutline(stroke: Stroke, baseWidth: number, quality: Outl
   }
   // End cap: left end → right end.
   const hEnd = halfAt(last.u);
-  out.push(...semicircle(last.p, hEnd, last.n, endT));
+  if (caps.end === 'butt') joinLine(out, sub(last.p, scale(last.n, hEnd)));
+  else out.push(...semicircle(last.p, hEnd, last.n, endT));
   // Right side, end → start (reversed).
   for (let k = right.length - 1; k >= 0; k--) {
     const rev = right[k].slice().reverse().map(reverseBezier);
@@ -75,7 +87,8 @@ export function strokeToOutline(stroke: Stroke, baseWidth: number, quality: Outl
   }
   // Start cap: right start → left start.
   const hStart = halfAt(first.u);
-  out.push(...semicircle(first.p, hStart, scale(first.n, -1), scale(startT, -1)));
+  if (caps.start === 'butt') joinLine(out, add(first.p, scale(first.n, hStart)));
+  else out.push(...semicircle(first.p, hStart, scale(first.n, -1), scale(startT, -1)));
   return out;
 }
 

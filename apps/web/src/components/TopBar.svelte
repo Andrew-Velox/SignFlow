@@ -1,7 +1,7 @@
 <script lang="ts">
   import Moon from '@lucide/svelte/icons/moon';
   import Sun from '@lucide/svelte/icons/sun';
-  import ArrowUpRight from '@lucide/svelte/icons/arrow-up-right';
+  import GithubIcon from './ui/GithubIcon.svelte';
   import IconButton from './ui/IconButton.svelte';
   import Keycap from './ui/Keycap.svelte';
   import { REPO_URL, editor } from '../stores/editor.svelte';
@@ -18,7 +18,7 @@
 
   <div class="pill actions">
     {#if REPO_URL}
-      <a class="link" href={REPO_URL} target="_blank" rel="noopener noreferrer">GitHub <ArrowUpRight size={14} strokeWidth={1.5} /></a>
+      <IconButton label="GitHub repository" icon={GithubIcon} href={REPO_URL} tip="bottom" />
     {/if}
     <IconButton
       label={editor.theme === 'dark' ? 'Light theme' : 'Dark theme'}
@@ -79,21 +79,6 @@
   .actions {
     gap: 4px;
   }
-  .link {
-    display: inline-flex;
-    align-items: center;
-    gap: 2px;
-    height: var(--hit);
-    padding: 0 8px;
-    color: var(--text-2);
-    text-decoration: none;
-    border-radius: var(--r-control);
-    transition: color var(--t-fast) var(--ease), background-color var(--t-fast) var(--ease);
-  }
-  .link:hover {
-    color: var(--text);
-    background: var(--raised);
-  }
   .export {
     display: inline-flex;
     align-items: center;
@@ -119,9 +104,19 @@
     background: transparent;
     border-color: color-mix(in srgb, var(--on-primary) 35%, transparent);
   }
-  @media (max-width: 340px) {
+  /* Keep the right-hand group (theme, export) fully on screen: it never shrinks, the brand gives way first. */
+  .actions {
+    flex: none;
+  }
+  .brand {
+    min-width: 0;
+  }
+  @media (max-width: 480px) {
     .name {
       display: none;
+    }
+    .brand {
+      padding: 0 12px;
     }
   }
   @media (max-width: 720px) {

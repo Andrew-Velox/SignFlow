@@ -5,20 +5,28 @@
   type Props = {
     label: string;
     icon: Component<{ size?: number; strokeWidth?: number }>;
-    onclick: () => void;
+    onclick?: () => void;
+    /** When set, renders a link that opens in a new tab instead of a button. */
+    href?: string;
     keys?: string[];
     active?: boolean;
     disabled?: boolean;
     /** Where the tooltip opens. */
     tip?: 'top' | 'bottom';
   };
-  let { label, icon: Icon, onclick, keys, active, disabled, tip = 'top' }: Props = $props();
+  let { label, icon: Icon, onclick, href, keys, active, disabled, tip = 'top' }: Props = $props();
 </script>
 
 <span class="wrap">
-  <button class="btn" class:active type="button" aria-label={label} aria-pressed={active} {disabled} {onclick}>
-    <Icon size={18} strokeWidth={1.5} />
-  </button>
+  {#if href}
+    <a class="btn" {href} target="_blank" rel="noopener noreferrer" aria-label={label}>
+      <Icon size={18} strokeWidth={1.5} />
+    </a>
+  {:else}
+    <button class="btn" class:active type="button" aria-label={label} aria-pressed={active} {disabled} {onclick}>
+      <Icon size={18} strokeWidth={1.5} />
+    </button>
+  {/if}
   <span class="tip {tip}" role="tooltip" aria-hidden="true">
     {label}
     {#if keys}<Keycap {keys} />{/if}
@@ -40,6 +48,7 @@
     background: transparent;
     border: 1px solid transparent;
     border-radius: var(--r-control);
+    text-decoration: none;
     transition:
       color var(--t-fast) var(--ease),
       background-color var(--t-fast) var(--ease),

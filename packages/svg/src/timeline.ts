@@ -34,9 +34,42 @@ export function sanitizeEasing(input: string | undefined, fallback = 'ease-in-ou
   const m = CUBIC.exec(e);
   if (m) {
     const [x1, y1, x2, y2] = m.slice(1).map(Number);
-    if ([x1, y1, x2, y2].every(Number.isFinite) && x1 >= 0 && x1 <= 1 && x2 >= 0 && x2 <= 1) return `cubic-bezier(${x1},${y1},${x2},${y2})`;
+    // Control points stay inside the unit square so the curve is monotonic (a pen never moves backwards).
+    if ([x1, y1, x2, y2].every(Number.isFinite) && x1 >= 0 && x1 <= 1 && x2 >= 0 && x2 <= 1 && y1 >= 0 && y1 <= 1 && y2 >= 0 && y2 <= 1) return `cubic-bezier(${x1},${y1},${x2},${y2})`;
   }
   return fallback;
+}
+
+const KEYWORD_CURVES: Record<string, [number, number, number, number]> = {
+  ease: [0.25, 0.1, 0.25, 1],
+  'ease-in': [0.42, 0, 1, 1],
+  'ease-out': [0, 0, 0.58, 1],
+  'ease-in-out': [0.42, 0, 0.58, 1],
+};
+
+/**
+ * The inverse of a (sanitised) CSS easing: given how far along the path the
+ * pen is (0..1), returns how far through the stroke's time that happens.
+ * Needed to time each slice of a stroke so the slices together follow the
+ * same easing as the stroke as a whole.
+ */
+export function easingInverse(easing: string): (progress: number) => number {
+  if (easing === 'linear') return (p) => Math.min(1, Math.max(0, p));
+  const m = CUBIC.exec(easing);
+  const [x1, y1, x2, y2] = m ? m.slice(1).map(Number) : (KEYWORD_CURVES[easing] ?? KEYWORD_CURVES['ease-in-out']);
+  const bez = (a: number, b: number, t: number) => 3 * a * (1 - t) * (1 - t) * t + 3 * b * (1 - t) * t * t + t * t * t;
+  // y(x) is monotonic; find x for a given y by bisection on the curve parameter.
+  return (p) => {
+    const target = Math.min(1, Math.max(0, p));
+    let lo = 0;
+    let hi = 1;
+    for (let i = 0; i < 40; i++) {
+      const t = (lo + hi) / 2;
+      if (bez(y1, y2, t) < target) lo = t;
+      else hi = t;
+    }
+    return bez(x1, x2, (lo + hi) / 2);
+  };
 }
 
 export function resolveAnimation(o: AnimationOptions = {}): ResolvedAnimation {

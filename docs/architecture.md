@@ -68,15 +68,21 @@ an `<img>`, in CSS backgrounds and inline.
   speed), with a minimum per stroke, a configurable pause between strokes, per-stroke easing, and
   optional looping with a hold at the end. It does not replay the *recorded* speed.
 - Variable width: SVG cannot dash-animate a filled shape, so each outline is revealed through a
-  `<mask>` holding the centre line (extended past both ends so the round caps are revealed),
-  animated with the same dash technique.
+  `<mask>` holding the centre line (extended past the stroke's ends so the round caps are revealed),
+  animated with the same dash technique. The outline is cut into ~70 px slices and every slice has
+  its **own** outline and its own mask. With one mask per stroke, a later part of the stroke that
+  passes near an earlier part is revealed early through the earlier part's mask (visible as little
+  nubs ahead of the pen at crossings and loops). Per-slice masks make that impossible by
+  construction. Measured on a crossing-heavy test signature: 5-13 px of ink leaked ahead of the pen
+  before, 0 px after, in every frame; the finished frame differs from the static export by 0.24 % of
+  its ink pixels (sub-pixel antialiasing). Cost: ~0.8 KB per slice (a 1400 px stroke: 5 KB -> 16 KB).
+  Each slice is timed from the stroke's easing curve (inverted), so the slices together follow the
+  same easing as the whole stroke. Slices overlap by 1.5 px and have flat joins, so no seam shows.
 - The default state is the finished drawing; the hidden state exists only in the keyframes, so
   viewers without animation support (and `prefers-reduced-motion`) show the full signature.
 - The dash/gap geometry keeps a margin on both sides so no round-cap dot can appear at the start
   or end of a hidden stroke.
-- Known limit: where the path crosses itself (loops), a few px of the later stroke can appear
-  slightly early inside the mask band of the earlier one. Constant-width mode has no mask and is
-  the most widely compatible choice.
+- Constant-width mode needs no mask at all, and is the smallest and most widely compatible choice.
 
 ## Measured (synthetic cursive loops, 120 Hz, 0.6 px noise, integer-quantised)
 
