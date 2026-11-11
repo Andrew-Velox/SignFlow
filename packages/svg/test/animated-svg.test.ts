@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { processStroke, type InputPoint, type Stroke } from '@signflow/core';
+import { processStroke, strokeToOutline, bezierPoint, type CubicBezier, type InputPoint, type Stroke } from '@signflow/core';
+import { samplePath, zigzagPath } from '../../core/test/helpers';
 import { buildAnimatedSvg, buildTimeline, easingInverse, resolveAnimation, sanitizeEasing, DOT_MS, MIN_STROKE_MS } from '../src';
 
 function line(x0: number, y0: number, x1: number, y1: number, id: string, n = 40): Stroke {
@@ -151,7 +152,7 @@ describe('buildAnimatedSvg', () => {
 
   it('works with no strokes, crop and output size like the static export', () => {
     const empty = buildAnimatedSvg({ ...base, strokes: [] });
-    expect(empty.svg).toContain('<g fill="#000000"></g>');
+    expect(empty.svg).toMatch(/<g fill="#000000"[^>]*><\/g>/);
     const r = buildAnimatedSvg({ ...base, crop: true, outputWidth: 500 });
     expect(r.width).toBe(500);
     expect(r.viewBox.width).toBeLessThan(960);
@@ -257,5 +258,60 @@ describe('easingInverse', () => {
     expect(sanitizeEasing('cubic-bezier(0.4,2,0.2,1)')).toBe('ease-in-out');
     expect(sanitizeEasing('cubic-bezier(0.4,-1,0.2,1)')).toBe('ease-in-out');
     expect(sanitizeEasing('cubic-bezier(0.4,0.2,0.2,1)')).toBe('cubic-bezier(0.4,0.2,0.2,1)');
+  });
+});
+
+describe('reveal mask covers the whole outline (regression: tiny white lens at loops in the animation only)', () => {
+  const dense = (segs: readonly CubicBezier[]) => segs.flatMap((s) => Array.from({ length: 31 }, (_, i) => bezierPoint(s, i / 30)));
+
+  it.each([
+    [7, 3, 4.5],
+    [8, 3, 6],
+    [7, 4, 4.5],
+  ])('mask band is at least as wide as the outline reaches (loops r=%s, valleys r=%s, pen %s)', (rl, rv, W) => {
+    const stroke = processStroke({ id: 'z', pointerKind: 'mouse', points: samplePath(zigzagPath(rl, rv), { seed: 4, noise: 0.25, speed: 700 }) });
+    const centre = dense(stroke.segments);
+    // The farthest the outline gets from the pen path, i.e. how much band the mask needs.
+    let reach = 0;
+    for (const p of dense(strokeToOutline(stroke, W, 'final'))) {
+      let best = Infinity;
+      for (const c of centre) best = Math.min(best, Math.hypot(p.x - c.x, p.y - c.y));
+      reach = Math.max(reach, best);
+    }
+    // Premise: the closing thickening really does push the outline past the plain pen band (else this test proves nothing).
+    const maxRel = Math.max(1, ...stroke.widthProfile.map((w) => w.w));
+    expect(reach).toBeGreaterThan((W * maxRel) / 2 + 1);
+
+    const { svg } = buildAnimatedSvg({ strokes: [stroke], width: 600, height: 300, strokeWidth: W, variableWidth: true });
+    const band = +svg.match(/stroke="#fff" stroke-width="([\d.]+)"/)![1] / 2;
+    expect(band).toBeGreaterThanOrEqual(reach); // otherwise the thickening that closes a loop is clipped and the hole reopens
+  });
+});
+
+describe('mask paths are straight segments (regression: hole in the mask band at tight loops in Chromium/Brave)', () => {
+  const maskPaths = (svg: string) => [...svg.matchAll(/<mask id="[^"]+"><path class="([^"]+)" d="([^"]+)"/g)].map((m) => ({ cls: m[1], d: m[2] }));
+
+  it('every mask path is a polyline: M and L commands only, never a curve', () => {
+    const { svg } = buildAnimatedSvg({ strokes, width: 960, height: 420, strokeWidth: 5, variableWidth: true });
+    const masks = maskPaths(svg);
+    expect(masks.length).toBeGreaterThan(2);
+    for (const m of masks) {
+      expect(m.d).toMatch(/^M[-\d.]+ [-\d.]+(L[-\d.]+ [-\d.]+)+$/);
+      expect(m.d).not.toMatch(/[CQSTAZ]/);
+    }
+  });
+
+  it('the dash always covers the whole mask path, with margin on both ends', () => {
+    const { svg } = buildAnimatedSvg({ strokes, width: 960, height: 420, strokeWidth: 5, variableWidth: true });
+    for (const m of maskPaths(svg)) {
+      const nums = m.d.replace(/[ML]/g, ' ').trim().split(/\s+/).map(Number);
+      let len = 0;
+      for (let i = 2; i < nums.length; i += 2) len += Math.hypot(nums[i] - nums[i - 2], nums[i + 1] - nums[i - 1]);
+      const rule = svg.match(new RegExp(`\\.${m.cls}\\{stroke-dasharray:([\\d.]+) ([\\d.]+);`))!;
+      const dash = +rule[1];
+      const gap = +rule[2];
+      expect(dash).toBeGreaterThanOrEqual(len); // a dash shorter than the path would leave its end hidden
+      expect(gap).toBeGreaterThan(len); // the next dash starts beyond the path end: no cap dot
+    }
   });
 });

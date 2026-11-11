@@ -103,7 +103,7 @@ describe('buildStaticSvg', () => {
   it('falls back to the full canvas for an empty drawing', () => {
     const r = buildStaticSvg({ ...base, strokes: [], crop: true });
     expect(r.viewBox).toEqual({ x: 0, y: 0, width: 960, height: 420 });
-    expect(r.svg).toContain('<g fill="#000000"></g>');
+    expect(r.svg).toMatch(/<g fill="#000000"[^>]*><\/g>/);
   });
 
   it('sanitises hostile input', () => {

@@ -1,14 +1,16 @@
 import {
-  bezierLength,
   bezierTangent,
   lineToBezier,
+  MAX_OUTLINE_BOOST,
+  outlinePiece,
+  outlineSamples,
   outlineToPath,
-  segmentsToPathData,
-  strokeToOutline,
+  sampleIndexAt,
   type CubicBezier,
 } from '@signflow/core';
 import { escapeXml, sanitizeNumber } from './sanitize';
 import { backgroundRect, layoutDrawing, svgOpen, type DrawingLayout, type StaticSvgOptions, type ViewBox } from './layout';
+import { flattenSegments, polylinePath } from './flatten';
 import { indexSegments, sliceStroke } from './slice';
 import { buildTimeline, easingInverse, resolveAnimation, type AnimationOptions, type ResolvedAnimation, type Timeline } from './timeline';
 
@@ -55,12 +57,6 @@ function extend(segments: readonly CubicBezier[], before: number, after: number)
   return out;
 }
 
-function chainLength(segments: readonly CubicBezier[]): number {
-  let l = 0;
-  for (const s of segments) l += bezierLength(s);
-  return l;
-}
-
 /**
  * A standalone animated SVG that writes the signature stroke by stroke, in
  * the original order, using only CSS (no JavaScript, works in `<img>`).
@@ -94,7 +90,8 @@ function serialize(l: DrawingLayout, anim: ResolvedAnimation, tl: Timeline, chun
   const css: string[] = [];
   const defs: string[] = [];
   const paths: string[] = [];
-  const maskHalf = (l.strokeWidth * l.maxRelativeWidth) / 2 + 1;
+  // Wide enough to cover the pen at its widest PLUS the deliberate thickening (loop closing, hairline bridging).
+  const maskHalf = (l.strokeWidth * l.maxRelativeWidth) / 2 + 1 + MAX_OUTLINE_BOOST;
 
   /** Dash-reveal rule + keyframes for one animated element, hidden until `startPct`, fully drawn at `endPct`. */
   const reveal = (cls: string, kf: string, len: number, startPct: number, endPct: number, timing: string) => {
@@ -135,7 +132,11 @@ function serialize(l: DrawingLayout, anim: ResolvedAnimation, tl: Timeline, chun
     // Variable width: slices, each with its own outline and its own mask.
     const idx = indexSegments(s.segments);
     const L = idx.total;
+    // The edges (with bend clamps, hairline bridging and small-loop closing) are computed ONCE for the whole
+    // stroke; every slice takes its piece of those same points, so the slices fit together exactly and their
+    // union is the static outline.
     const count = chunk > 0 ? Math.max(1, Math.round(L / chunk)) : 1;
+    const os = count > 1 ? outlineSamples(s, l.strokeWidth, 'final') : null;
     const timeAt = (pos: number) => start + (end - start) * inverse(Math.min(1, Math.max(0, pos / L)));
 
     for (let k = 0; k < count; k++) {
@@ -144,14 +145,21 @@ function serialize(l: DrawingLayout, anim: ResolvedAnimation, tl: Timeline, chun
       const from = first ? 0 : (L * k) / count - OVERLAP;
       const to = lastSlice ? L : (L * (k + 1)) / count + OVERLAP;
       const slice = count === 1 ? s : sliceStroke(s, idx, from, to);
-      const outline =
-        count === 1
-          ? it.d
-          : outlineToPath(strokeToOutline(slice, l.strokeWidth, 'final', { start: first ? 'round' : 'butt', end: lastSlice ? 'round' : 'butt' }), l.precision);
+      let outline = it.d;
+      if (count > 1 && os) {
+        // This slice's piece of the shared edge points: samples from `from` to `to` along the stroke.
+        const i0 = sampleIndexAt(os, from / L);
+        const i1 = Math.min(os.samples.length - 1, Math.max(i0 + 1, sampleIndexAt(os, to / L)));
+        outline = outlineToPath(outlinePiece(os, i0, i1, 'final', { start: first ? 'round' : 'butt', end: lastSlice ? 'round' : 'butt' }), l.precision);
+      }
 
       // The mask path is the slice's centre line, extended at the stroke's ends so the round caps are revealed.
       const maskSegs = extend(slice.segments, first ? maskHalf : 0, lastSlice ? maskHalf : 0);
-      const len = chainLength(maskSegs);
+      // Straight segments, not curves: a wide stroke around a tight loop or hairpin of curves can leave a hole
+      // in the band in Chromium-based browsers (see flatten.ts). The length is that of the rounded polyline, so
+      // the dash covers it exactly.
+      const mask = polylinePath(flattenSegments(maskSegs, 0.1), l.precision);
+      const len = mask.length;
       const j = count === 1 ? `${i}` : `${i}-${k}`;
       // The slice is revealed over the time the pen needs to cover its range of the path.
       const t0 = timeAt(first ? -maskHalf : from);
@@ -159,7 +167,7 @@ function serialize(l: DrawingLayout, anim: ResolvedAnimation, tl: Timeline, chun
 
       reveal(`sf-a${j}`, `sf-k${j}`, len, pct(t0), pct(Math.max(t1, t0)), 'linear');
       defs.push(
-        `<mask id="sf-m${j}"><path class="sf-a${j}" d="${segmentsToPathData(maskSegs, l.precision)}" fill="none" stroke="#fff" stroke-width="${f(maskHalf * 2)}" stroke-linejoin="round"/></mask>`,
+        `<mask id="sf-m${j}"><path class="sf-a${j}" d="${mask.d}" fill="none" stroke="#fff" stroke-width="${f(maskHalf * 2)}" stroke-linejoin="round"/></mask>`,
       );
       paths.push(`<path d="${outline}" mask="url(#sf-m${j})"/>`);
     }

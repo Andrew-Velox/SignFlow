@@ -184,3 +184,36 @@ export function nearestDistance(samples: readonly Vec2[], reach = 60): (q: Vec2)
     return best === Infinity ? reach * 10 : best;
   };
 }
+
+/** Sharp zigzag: slanted legs, a small loop at every peak, a tight turn in every valley. */
+export function zigzagPath(rLoop: number, rValley: number, peaks = 3): Vec2[] {
+  const path: Vec2[] = [];
+  let x = 30;
+  let y = 220;
+  let th = (-70 * Math.PI) / 180;
+  const straight = (n: number) => {
+    for (let i = 0; i < n; i++) {
+      path.push({ x, y });
+      x += Math.cos(th);
+      y += Math.sin(th);
+    }
+  };
+  const turn = (deg: number, r: number) => {
+    const steps = Math.round(((Math.abs(deg) * Math.PI) / 180) * r);
+    const d = Math.sign(deg);
+    for (let i = 0; i < steps; i++) {
+      path.push({ x, y });
+      x += Math.cos(th);
+      y += Math.sin(th);
+      th += d / r;
+    }
+  };
+  for (let p = 0; p < peaks; p++) {
+    straight(95);
+    turn(500, rLoop);
+    straight(95);
+    turn(-140, rValley);
+  }
+  straight(80);
+  return path;
+}

@@ -30,6 +30,7 @@ export function segmentsToPathData(segments: readonly CubicBezier[], precision =
       Math.abs(s.p0.x - s.p1.x) < EPS && Math.abs(s.p0.y - s.p1.y) < EPS &&
       Math.abs(s.p0.x - s.p2.x) < EPS && Math.abs(s.p0.y - s.p2.y) < EPS;
     if (collapsed) {
+      if (close) continue; // a zero-length piece of a closed outline is simply dropped, never a new subpath
       d += `M${f(s.p0.x)} ${f(s.p0.y)}h0`;
       inCurve = false;
       cx = s.p3.x;
@@ -37,7 +38,9 @@ export function segmentsToPathData(segments: readonly CubicBezier[], precision =
       continue;
     }
     if (Math.abs(s.p0.x - cx) > EPS || Math.abs(s.p0.y - cy) > EPS || Number.isNaN(cx)) {
-      d += `M${f(s.p0.x)} ${f(s.p0.y)}`;
+      // In a closed outline a break must not start a new subpath: the fill would close each piece with a
+      // chord of its own. Bridge it with a straight line instead.
+      d += close && !Number.isNaN(cx) ? `L${f(s.p0.x)} ${f(s.p0.y)}` : `M${f(s.p0.x)} ${f(s.p0.y)}`;
       inCurve = false;
     }
     d += (inCurve ? ' ' : 'C') + `${f(s.p1.x)} ${f(s.p1.y)} ${f(s.p2.x)} ${f(s.p2.y)} ${f(s.p3.x)} ${f(s.p3.y)}`;

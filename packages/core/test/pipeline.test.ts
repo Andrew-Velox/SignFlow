@@ -1,13 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import {
   StrokeBuilder,
+  lineToBezier,
+  type CubicBezier,
+  type Stroke,
   bezierBounds,
+  bezierLength,
   bezierTangent,
   processStroke,
   strokeBounds,
   strokeCenterlinePath,
   strokeHasPressure,
   strokeOutlinePath,
+  segmentsToPathData,
+  outlinePiece,
+  outlineSamples,
   strokeToOutline,
   unionBounds,
   widthAt,
@@ -26,6 +33,7 @@ import {
   rawStroke,
   penWalk,
   roughness,
+  zigzagPath,
   samplePath,
   sampleSegments,
 } from './helpers';
@@ -397,8 +405,10 @@ describe('strokeToOutline', () => {
     const s = processStroke(rawStroke(mouse));
     const fin = sampleSegments(strokeToOutline(s, 6, 'final'), 20);
     const live = sampleSegments(strokeToOutline(s, 6, 'live'), 2);
-    expect(maxDeviation(live, fin)).toBeLessThan(0.3);
-    expect(maxDeviation(fin, live)).toBeLessThan(0.3);
+    // Final quality also bridges hairline gaps between nearby parts of the stroke (up to ~1.5 px of extra
+    // thickness right at a gap); live frames skip that finishing touch.
+    expect(maxDeviation(live, fin)).toBeLessThan(1.7);
+    expect(maxDeviation(fin, live)).toBeLessThan(1.7);
   });
 
   it('returns nothing for empty strokes', () => {
@@ -550,5 +560,252 @@ describe('outline spikes at sharp turns (regression)', () => {
     const stroke = processStroke(rawStroke(pts));
     expect(maxStray(stroke, 'final')).toBeLessThan(LIMIT);
     expect(maxStray(stroke, 'live')).toBeLessThan(LIMIT);
+  });
+});
+
+describe('gap bridging (hairline slits between nearby parts of a stroke)', () => {
+  const K = 0.5522847498307936;
+  /** Out along y = 50, a half-circle U-turn, and back along y = 50 + D: two legs whose edges are `D - width` apart. */
+  const uTurn = (D: number): Stroke => {
+    const r = D / 2;
+    const segs: CubicBezier[] = [
+      lineToBezier({ x: 20, y: 50 }, { x: 220, y: 50 }),
+      { p0: { x: 220, y: 50 }, p1: { x: 220 + K * r, y: 50 }, p2: { x: 220 + r, y: 50 + r - K * r }, p3: { x: 220 + r, y: 50 + r } },
+      { p0: { x: 220 + r, y: 50 + r }, p1: { x: 220 + r, y: 50 + r + K * r }, p2: { x: 220 + K * r, y: 50 + D }, p3: { x: 220, y: 50 + D } },
+      lineToBezier({ x: 220, y: 50 + D }, { x: 20, y: 50 + D }),
+    ];
+    const length = segs.reduce((a, b) => a + bezierLength(b), 0);
+    return { id: 'u', pointerKind: 'mouse', segments: segs, widthProfile: [], length, isDot: false };
+  };
+
+  /** Non-zero winding number of a closed polyline around a point. */
+  const winding = (pt: Vec2, poly: Vec2[]): number => {
+    let w = 0;
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i];
+      const b = poly[(i + 1) % poly.length];
+      const cross = (b.x - a.x) * (pt.y - a.y) - (pt.x - a.x) * (b.y - a.y);
+      if (a.y <= pt.y) {
+        if (b.y > pt.y && cross > 0) w++;
+      } else if (b.y <= pt.y && cross < 0) w--;
+    }
+    return w;
+  };
+  const insideAt = (stroke: Stroke, width: number, quality: 'live' | 'final', at: Vec2) =>
+    winding(at, sampleSegments(strokeToOutline(stroke, width, quality), 10)) !== 0;
+
+  const W = 6; // legs are 6 px thick
+  it('closes a true hairline gap (0.5 px) between two legs in committed/final quality', () => {
+    const D = W + 0.5;
+    const between = { x: 120, y: 50 + D / 2 };
+    expect(insideAt(uTurn(D), W, 'final', between)).toBe(true);
+    // Without bridging (live frames) the sliver is still there: this is exactly the defect being fixed.
+    expect(insideAt(uTurn(D), W, 'live', between)).toBe(false);
+  });
+
+  it('leaves anything wider than a hairline alone (1.5 px and 4 px)', () => {
+    // A wider threshold fuses the legs of every V-shaped joint, so only true hairlines are bridged.
+    for (const gapPx of [1.5, 4]) {
+      const D = W + gapPx;
+      expect(insideAt(uTurn(D), W, 'final', { x: 120, y: 50 + D / 2 })).toBe(false);
+    }
+  });
+
+  it('does not change the stroke where nothing is close', () => {
+    const line = rawStroke(Array.from({ length: 60 }, (_, i) => ({ x: 20 + i * 4, y: 50, t: i * 8, pressure: 0.5 })));
+    const lone = processStroke(line, { velocitySensitivity: 0, curvature: 0, taper: 0, smoothing: 0.3 });
+    const live = sampleSegments(strokeToOutline(lone, 6, 'live'), 4);
+    const fin = sampleSegments(strokeToOutline(lone, 6, 'final'), 4);
+    expect(maxDeviation(fin, live)).toBeLessThan(0.3);
+  });
+
+  it('only thickens the facing edges, by about the size of the gap', () => {
+    const D = W + 0.5;
+    const ys = sampleSegments(strokeToOutline(uTurn(D), W, 'final'), 10)
+      .filter((p) => p.x > 60 && p.x < 180)
+      .map((p) => p.y);
+    // Outer faces stay put: the stroke spans 50 - 3 .. 50 + D + 3.
+    expect(Math.min(...ys)).toBeGreaterThan(50 - 3 - 0.2);
+    expect(Math.max(...ys)).toBeLessThan(50 + D + 3 + 0.2);
+  });
+});
+
+describe('small loops and joints (regression: white lens in a tiny loop, heavier V-joints)', () => {
+  /** Outline polygon area (shoelace) of a closed chain, sampled densely. */
+  const area = (segs: CubicBezier[]) => {
+    const poly = sampleSegments(segs, 12);
+    let a2 = 0;
+    for (let i = 0; i < poly.length; i++) {
+      const u = poly[i];
+      const v = poly[(i + 1) % poly.length];
+      a2 += u.x * v.y - v.x * u.y;
+    }
+    return Math.abs(a2) / 2;
+  };
+  const winding = (pt: Vec2, poly: Vec2[]): number => {
+    let w = 0;
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i];
+      const b = poly[(i + 1) % poly.length];
+      const cross = (b.x - a.x) * (pt.y - a.y) - (pt.x - a.x) * (b.y - a.y);
+      if (a.y <= pt.y) {
+        if (b.y > pt.y && cross > 0) w++;
+      } else if (b.y <= pt.y && cross < 0) w--;
+    }
+    return w;
+  };
+
+  /** Straight down, a 270° turn of radius r (the path crosses itself: a loop), then straight on. */
+  const loopStroke = (r: number) => {
+    const path: Vec2[] = [];
+    let x = 120;
+    let y = 40;
+    let th = Math.PI / 2;
+    for (let i = 0; i < 90; i++) { path.push({ x, y }); x += Math.cos(th); y += Math.sin(th); }
+    const centre = { x: x + r * Math.cos(th - Math.PI / 2), y: y + r * Math.sin(th - Math.PI / 2) }; // the turn bends toward +x
+    const steps = Math.round(1.5 * Math.PI * r);
+    for (let i = 0; i < steps; i++) { path.push({ x, y }); x += Math.cos(th); y += Math.sin(th); th -= 1 / r; }
+    for (let i = 0; i < 70; i++) { path.push({ x, y }); x += Math.cos(th); y += Math.sin(th); }
+    return { stroke: processStroke(rawStroke(samplePath(path, { seed: 3, noise: 0.2, speed: 500 }))), centre };
+  };
+  /** How many points on a grid around the loop centre are NOT covered by ink. */
+  const unfilled = (stroke: Stroke, width: number, quality: 'live' | 'final', c: Vec2, radius: number) => {
+    const poly = sampleSegments(strokeToOutline(stroke, width, quality), 10);
+    let n = 0;
+    for (let dx = -radius; dx <= radius; dx += 0.5) for (let dy = -radius; dy <= radius; dy += 0.5) if (winding({ x: c.x + dx, y: c.y + dy }, poly) === 0) n++;
+    return n;
+  };
+
+  it('closes the thin white lens inside a very small loop, in committed/final quality only', () => {
+    // Pen 6 on a radius-7 loop leaves a ~30 px² hole (a thin lens): real ink would fill it.
+    const { stroke, centre } = loopStroke(7);
+    expect(unfilled(stroke, 6, 'live', centre, 4)).toBeGreaterThan(20);
+    expect(unfilled(stroke, 6, 'final', centre, 4)).toBe(0);
+  });
+
+  it('keeps a real counter open (the inside of a cursive e or l)', () => {
+    for (const [r, w] of [[14, 6], [11, 9], [20, 4.5], [9, 4.5]] as const) {
+      const { stroke, centre } = loopStroke(r);
+      expect(unfilled(stroke, w, 'final', centre, 3)).toBeGreaterThan(20); // still white around the centre
+    }
+  });
+
+  it('adds almost no weight at a V-shaped joint (legs converging to a point)', () => {
+    const a = (12 / 2) * (Math.PI / 180);
+    const apex = { x: 120, y: 150 };
+    const down = Array.from({ length: 131 }, (_, i) => ({ x: apex.x - Math.sin(a) * (130 - i), y: apex.y - Math.cos(a) * (130 - i) }));
+    const up = Array.from({ length: 131 }, (_, i) => ({ x: apex.x + Math.sin(a) * i, y: apex.y - Math.cos(a) * i }));
+    const stroke = processStroke(rawStroke(samplePath([...down, ...up], { seed: 5, noise: 0.3, speed: 600 })));
+    for (const w of [4.5, 8]) {
+      const live = area(strokeToOutline(stroke, w, 'live'));
+      const fin = area(strokeToOutline(stroke, w, 'final'));
+      expect(fin / live).toBeLessThan(1.03); // distance-based bridging used to add 3-5 % here
+      expect(fin / live).toBeGreaterThan(0.97);
+    }
+  });
+});
+
+describe('outline is always one closed, contiguous loop (regression: spike / notch from broken subpaths)', () => {
+  const gap = (a: Vec2, b: Vec2) => Math.hypot(a.x - b.x, a.y - b.y);
+
+  it.each([4.5, 9])('random strokes at pen width %s: no break in the chain, closed exactly', (W) => {
+    for (let seed = 1; seed <= 40; seed++) {
+      const pts = penWalk(seed).map((p) => ({ ...p, x: p.x * 0.5 + 10, y: p.y * 0.5 + 10 }));
+      const stroke = processStroke(rawStroke(pts));
+      for (const quality of ['final', 'live'] as const) {
+        const o = strokeToOutline(stroke, W, quality);
+        for (let i = 0; i < o.length - 1; i++) expect(gap(o[i].p3, o[i + 1].p0)).toBeLessThan(1e-6);
+        expect(gap(o[o.length - 1].p3, o[0].p0)).toBeLessThan(1e-6);
+      }
+    }
+  });
+
+  it('path data for an outline is a single subpath', () => {
+    for (let seed = 1; seed <= 40; seed++) {
+      const pts = penWalk(seed).map((p) => ({ ...p, x: p.x * 0.5 + 10, y: p.y * 0.5 + 10 }));
+      const d = strokeOutlinePath(processStroke(rawStroke(pts)), 9);
+      expect(d.match(/M/g)).toHaveLength(1);
+      expect(d.endsWith('Z')).toBe(true);
+    }
+  });
+
+  it('a break inside a closed path is bridged with a line, never a second subpath', () => {
+    const a = lineToBezier({ x: 0, y: 0 }, { x: 10, y: 0 });
+    const b = lineToBezier({ x: 12, y: 3 }, { x: 20, y: 3 }); // does not start where `a` ends
+    const open = segmentsToPathData([a, b]);
+    const closed = segmentsToPathData([a, b], 2, true);
+    expect(open.match(/M/g)).toHaveLength(2);
+    expect(closed.match(/M/g)).toHaveLength(1);
+    expect(closed).toContain('L12 3');
+  });
+
+  it('drops zero-length pieces of a closed outline instead of starting a subpath', () => {
+    const p = { x: 5, y: 5 };
+    const a = lineToBezier({ x: 0, y: 0 }, p);
+    const dot: CubicBezier = { p0: p, p1: p, p2: p, p3: p };
+    const b = lineToBezier(p, { x: 9, y: 0 });
+    expect(segmentsToPathData([a, dot, b], 2, true).match(/M/g)).toHaveLength(1);
+  });
+});
+
+describe('outline pieces (the animation reveals a stroke slice by slice)', () => {
+  const winding = (pt: Vec2, poly: Vec2[]): number => {
+    let w = 0;
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i];
+      const b = poly[(i + 1) % poly.length];
+      const cross = (b.x - a.x) * (pt.y - a.y) - (pt.x - a.x) * (b.y - a.y);
+      if (a.y <= pt.y) {
+        if (b.y > pt.y && cross > 0) w++;
+      } else if (b.y <= pt.y && cross < 0) w--;
+    }
+    return w;
+  };
+
+  /** Cuts the stroke into `n` overlapping index ranges and builds one closed outline per range. */
+  const pieces = (stroke: Stroke, width: number, n: number) => {
+    const os = outlineSamples(stroke, width, 'final')!;
+    const last = os.samples.length - 1;
+    return Array.from({ length: n }, (_, k) => {
+      const i0 = k === 0 ? 0 : Math.round((last * k) / n) - 2;
+      const i1 = k === n - 1 ? last : Math.round((last * (k + 1)) / n) + 2;
+      return sampleSegments(outlinePiece(os, i0, i1, 'final', { start: k === 0 ? 'round' : 'butt', end: k === n - 1 ? 'round' : 'butt' }), 10);
+    });
+  };
+
+  it.each([
+    [7, 3, 4.5],
+    [8, 3, 6],
+    [6, 2.5, 8],
+  ])('the union of the pieces is the whole outline: no deep point is lost (loops r=%s, valleys r=%s, pen %s)', (rl, rv, W) => {
+    const stroke = processStroke(rawStroke(samplePath(zigzagPath(rl, rv), { seed: 4, noise: 0.25, speed: 700 })));
+    const whole = sampleSegments(strokeToOutline(stroke, W), 10);
+    const parts = pieces(stroke, W, 12);
+    // Depth is measured against a densely sampled boundary: on a long straight edge a sparse polygon would put
+    // the nearest vertex several px away and make edge points look deep inside.
+    const near = nearestDistance(sampleSegments(strokeToOutline(stroke, W), 80), 8);
+    let xs = whole.map((p) => p.x);
+    let ys = whole.map((p) => p.y);
+    let deepMiss = 0;
+    for (let x = Math.min(...xs); x <= Math.max(...xs); x += 0.5) {
+      for (let y = Math.min(...ys); y <= Math.max(...ys); y += 0.5) {
+        const p = { x, y };
+        if (winding(p, whole) !== 0 && near(p) > 0.8 && !parts.some((poly) => winding(p, poly) !== 0)) deepMiss++;
+      }
+    }
+    // Pieces use the very same edge points as the whole outline, so only curve-fit noise at the edges can differ.
+    expect(deepMiss).toBe(0);
+    xs = ys = [];
+  });
+
+  it('every piece is a single closed, contiguous loop', () => {
+    const stroke = processStroke(rawStroke(samplePath(zigzagPath(7, 3), { seed: 4, noise: 0.25, speed: 700 })));
+    const os = outlineSamples(stroke, 5, 'final')!;
+    const last = os.samples.length - 1;
+    for (let k = 0; k < 10; k++) {
+      const o = outlinePiece(os, Math.round((last * k) / 10), Math.min(last, Math.round((last * (k + 1)) / 10) + 2), 'final', { start: 'butt', end: 'butt' });
+      for (let i = 0; i < o.length - 1; i++) expect(Math.hypot(o[i].p3.x - o[i + 1].p0.x, o[i].p3.y - o[i + 1].p0.y)).toBeLessThan(1e-6);
+      expect(Math.hypot(o[o.length - 1].p3.x - o[0].p0.x, o[o.length - 1].p3.y - o[0].p0.y)).toBeLessThan(1e-6);
+    }
   });
 });
