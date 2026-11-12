@@ -23,7 +23,7 @@ No backend, no accounts, no analytics.
 
 Exports a transparent **static SVG**, an **animated SVG** (strokes drawn one after another, CSS only, no JavaScript) and a **PNG**, with optional rotation.
 
-## Demo
+---
 
 <a href="docs/demo.mp4">
   <img src="docs/demo-poster.jpg" alt="SignFlow demo: draw a signature, preview the animation, export SVG" width="720" />
