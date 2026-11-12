@@ -27,7 +27,7 @@ Exports a transparent **static SVG**, an **animated SVG** (strokes drawn one aft
 
 <div align="center">
 
-<img src="docs/demo.gif" alt="SignFlow demo: draw a signature, preview the animation, export SVG" width="720" />
+<img src="docs/demo.webp" alt="SignFlow demo: draw a signature, preview the animation, export SVG" width="720" />
 
 <sub>[Watch the full-quality video](docs/demo.mp4)</sub>
 
