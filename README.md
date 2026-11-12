@@ -19,19 +19,19 @@ No backend, no accounts, no analytics.
 
 </div>
 
+<div align="center">
+
+<img src="docs/demo.webp" alt="SignFlow demo: draw a signature, preview the animation, export SVG" width="720" />
+
+</div>
+
 ---
 
 Exports a transparent **static SVG**, an **animated SVG** (strokes drawn one after another, CSS only, no JavaScript) and a **PNG**, with optional rotation.
 
 ---
 
-<div align="center">
 
-<img src="docs/demo.webp" alt="SignFlow demo: draw a signature, preview the animation, export SVG" width="720" />
-
-<sub>[Watch the full-quality video](docs/demo.mp4)</sub>
-
-</div>
 
 ```bash
 npm install
