@@ -6,6 +6,7 @@
   import Play from '@lucide/svelte/icons/play';
   import Pause from '@lucide/svelte/icons/pause';
   import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
+  import RotateCw from '@lucide/svelte/icons/rotate-cw';
   import { buildAnimatedSvg, buildStaticSvg } from '@signflow/svg';
   import Slider from './ui/Slider.svelte';
   import Switch from './ui/Switch.svelte';
@@ -29,6 +30,7 @@
     variableWidth: editor.variable,
     crop: editor.crop,
     padding: editor.padding,
+    rotation: editor.rotation,
   });
   const staticSvg = $derived(hasInk ? buildStaticSvg({ ...shared, title: 'Signature' }) : null);
   const animatedSvg = $derived(
@@ -46,6 +48,11 @@
   const staticSrc = $derived(staticSvg ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(staticSvg.svg)}` : '');
   const seconds = $derived(animatedSvg ? animatedSvg.timeline.ends[animatedSvg.timeline.ends.length - 1] / 1000 : 0);
   const kb = (s: string) => (new Blob([s]).size / 1024).toFixed(1);
+
+  /** Adds a quarter turn (or any step) and keeps the angle in -180..180. */
+  function turn(by: number) {
+    editor.rotation = ((((editor.rotation + by + 180) % 360) + 360) % 360) - 180;
+  }
 
   function replay() {
     paused = false;
@@ -123,6 +130,20 @@
         <span class="mono">{seconds.toFixed(1)} s</span>
       </div>
     {/if}
+
+    <section>
+      <h3>Rotate</h3>
+      <Slider label="Angle" bind:value={editor.rotation} min={-180} max={180} step={1} format={(v) => `${v}°`} />
+      <div class="turns">
+        <button type="button" class="ghost" aria-label="Rotate 90 degrees counter-clockwise" onclick={() => turn(-90)}>
+          <RotateCcw size={14} strokeWidth={1.5} /> 90°
+        </button>
+        <button type="button" class="ghost" aria-label="Rotate 90 degrees clockwise" onclick={() => turn(90)}>
+          <RotateCw size={14} strokeWidth={1.5} /> 90°
+        </button>
+        <button type="button" class="ghost" onclick={() => (editor.rotation = 0)} disabled={editor.rotation === 0}>Reset</button>
+      </div>
+    </section>
 
     <section>
       <h3>Frame</h3>
@@ -338,7 +359,16 @@
     border-radius: var(--r-control);
     transition: color var(--t-fast) var(--ease), background-color var(--t-fast) var(--ease);
   }
-  .ghost:hover {
+  .turns {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+  .ghost:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+  .ghost:hover:not(:disabled) {
     color: var(--text);
     background: var(--raised);
   }

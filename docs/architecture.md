@@ -118,6 +118,19 @@ an `<img>`, in CSS backgrounds and inline.
 
 Atrament (raster, per-event recursive pull `p = x - (x - prev) * k`, k ≈ 0.85) feels smooth because the ink glides behind the pointer, never redraws old ink and rate-limits thickness. It smooths *more* at higher speed, depends on event rate, ends short of the cursor and stores no geometry. SignFlow keeps those good properties (incremental/layered drawing, bounded width change) but filters by time, so behaviour does not depend on device event rate, and keeps vector output.
 
+## Rotation
+
+The export drawer can turn the signature by any angle (clockwise positive) before download. Rotation is
+applied to the stroke geometry itself (`rotateStroke`, a rigid transform), not with an SVG `transform`, so
+the outline, the tight crop box, the slice-by-slice animation and the PNG are all derived from the rotated
+shape and the file stays a plain set of paths. Stroke order, length and width profile are unchanged, so the
+animation timing is identical. When cropping, the ink turns about the centre of its own bounding box and the
+viewBox is recomputed from the rotated outline; with cropping off, the whole page turns about its centre and
+the viewBox grows to the rotated page, so no corner is lost. Multiples of 90 degrees use exact sine/cosine
+values so quarter turns give clean coordinates. 0 (or any whole turn) returns the very same strokes and
+byte-identical output. Verified by rendering static and animated exports at 25, 90, -60 and 180 degrees in
+headless Brave: the animated end state matches the static file exactly (0 missing, 0 extra ink).
+
 ## Outline integrity
 
 The outline must be **one closed, contiguous chain**. Any break, even 1e-6 px, makes the path emitter

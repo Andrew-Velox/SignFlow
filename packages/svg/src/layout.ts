@@ -2,7 +2,10 @@ import {
   bezierBounds,
   formatNumber,
   outlineToPath,
+  rotatePoint,
+  rotateStroke,
   segmentsToPathData,
+  strokeBounds,
   strokeToOutline,
   unionBounds,
   type Bounds,
@@ -24,6 +27,12 @@ export interface StaticSvgOptions {
   crop?: boolean;
   /** Margin around the ink in logical units when cropping. */
   padding?: number;
+  /**
+   * Rotates the whole signature by this many degrees, clockwise (negative = counter-clockwise). The ink turns
+   * about its own centre when cropping, and the page turns about its centre otherwise; in both cases the
+   * viewBox grows to contain the result, so nothing is clipped. 0 (default) leaves the output unchanged.
+   */
+  rotation?: number;
   /** Rendered width of the `<svg>` in px (height follows the aspect ratio). Defaults to the viewBox size. */
   outputWidth?: number;
   /** null / undefined = transparent (default). */
@@ -72,10 +81,31 @@ export function layoutDrawing(o: StaticSvgOptions): DrawingLayout {
   const variable = o.variableWidth ?? true;
   const fmt = (n: number) => formatNumber(n, precision);
 
+  const fullW = sanitizeNumber(o.width, 960, 1, MAX_SIZE);
+  const fullH = sanitizeNumber(o.height, 420, 1, MAX_SIZE);
+  const rotation = sanitizeNumber(o.rotation, 0, -3600, 3600);
+  const turned = rotation % 360 !== 0;
+
+  // Rotation is applied to the stroke geometry itself (rigid), so the outline, the crop box, the animation and
+  // the PNG are all derived from the rotated shape and no `transform` attribute is needed in the file.
+  let strokes: readonly Stroke[] = o.strokes;
+  let pivot = { x: fullW / 2, y: fullH / 2 };
+  if (turned) {
+    if (o.crop) {
+      let c: Bounds | null = null;
+      for (const s of o.strokes) {
+        const b = strokeBounds(s);
+        if (b) c = unionBounds(c, b);
+      }
+      if (c) pivot = { x: (c.minX + c.maxX) / 2, y: (c.minY + c.maxY) / 2 };
+    }
+    strokes = o.strokes.map((s) => rotateStroke(s, rotation, pivot));
+  }
+
   let ink: Bounds | null = null;
   let maxRel = 1;
   const items: LayoutItem[] = [];
-  for (const s of o.strokes) {
+  for (const s of strokes) {
     if (!s.segments.length) continue;
     for (const w of s.widthProfile) maxRel = Math.max(maxRel, w.w);
     if (variable) {
@@ -93,9 +123,26 @@ export function layoutDrawing(o: StaticSvgOptions): DrawingLayout {
     }
   }
 
-  const fullW = sanitizeNumber(o.width, 960, 1, MAX_SIZE);
-  const fullH = sanitizeNumber(o.height, 420, 1, MAX_SIZE);
   let viewBox: ViewBox = { x: 0, y: 0, width: fullW, height: fullH };
+  if (turned && !o.crop) {
+    // The whole page is turned: use the bounding box of the rotated page so no corner is cut off.
+    const corners = [
+      { x: 0, y: 0 },
+      { x: fullW, y: 0 },
+      { x: fullW, y: fullH },
+      { x: 0, y: fullH },
+    ].map((p) => rotatePoint(p, rotation, pivot));
+    const xs = corners.map((p) => p.x);
+    const ys = corners.map((p) => p.y);
+    const x = Math.floor(Math.min(...xs) * 100) / 100;
+    const y = Math.floor(Math.min(...ys) * 100) / 100;
+    viewBox = {
+      x,
+      y,
+      width: Math.max(1, Math.ceil((Math.max(...xs) - x) * 100) / 100),
+      height: Math.max(1, Math.ceil((Math.max(...ys) - y) * 100) / 100),
+    };
+  }
   if (o.crop && ink) {
     const pad = sanitizeNumber(o.padding, 8, 0, 1000);
     // Round outwards so antialiased edges are never clipped.

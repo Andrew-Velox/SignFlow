@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { processStroke, type InputPoint, type RawStroke, type Stroke } from '@signflow/core';
-import { buildStaticSvg, escapeXml, sanitizeColor } from '../src';
+import { bezierLength, processStroke, rotateStroke, strokeToOutline, type InputPoint, type RawStroke, type Stroke } from '@signflow/core';
+import { buildAnimatedSvg, buildStaticSvg, escapeXml, sanitizeColor } from '../src';
 
 function line(x0: number, y0: number, x1: number, y1: number, id: string): Stroke {
   const n = 40;
@@ -139,5 +139,105 @@ describe('sanitize helpers', () => {
   });
   it('escapes XML metacharacters', () => {
     expect(escapeXml(`<a href="x">&'`)).toBe('&lt;a href=&quot;x&quot;&gt;&amp;&apos;');
+  });
+});
+
+describe('rotation', () => {
+  const crop = { ...base, crop: true, padding: 10 };
+  const sizeOf = (r: { viewBox: { width: number; height: number } }) => ({ w: r.viewBox.width, h: r.viewBox.height });
+  const numbersIn = (svg: string) => [...svg.matchAll(/ d="([^"]+)"/g)].flatMap((m) => m[1].replace(/[A-Za-z]/g, ' ').trim().split(/\s+/).map(Number));
+
+  it('0, undefined and whole turns leave the output byte-for-byte unchanged', () => {
+    const plain = buildStaticSvg(crop).svg;
+    for (const rotation of [0, 360, -360, 720, undefined]) expect(buildStaticSvg({ ...crop, rotation }).svg).toBe(plain);
+  });
+
+  it('90 degrees swaps the width and height of the cropped box', () => {
+    const a = sizeOf(buildStaticSvg(crop));
+    const b = sizeOf(buildStaticSvg({ ...crop, rotation: 90 }));
+    expect(b.w).toBeCloseTo(a.h, 0);
+    expect(b.h).toBeCloseTo(a.w, 0);
+    const c = sizeOf(buildStaticSvg({ ...crop, rotation: -90 }));
+    expect(c.w).toBeCloseTo(a.h, 0);
+    expect(c.h).toBeCloseTo(a.w, 0);
+  });
+
+  it('180 degrees keeps the box size but turns the drawing', () => {
+    const a = buildStaticSvg(crop);
+    const b = buildStaticSvg({ ...crop, rotation: 180 });
+    expect(b.viewBox.width).toBeCloseTo(a.viewBox.width, 0);
+    expect(b.viewBox.height).toBeCloseTo(a.viewBox.height, 0);
+    expect(b.svg).not.toBe(a.svg);
+  });
+
+  it('rotation is rigid: the outline of every stroke keeps its length and the width profile is untouched', () => {
+    const lengthOf = (rot: number) =>
+      strokes.reduce((total, st) => {
+        const turned = rotateStroke(st, rot, { x: 200, y: 150 });
+        return total + strokeToOutline(turned, 5, 'final').reduce((a, seg) => a + bezierLength(seg), 0);
+      }, 0);
+    for (const rot of [30, 90, 137, 180]) expect(lengthOf(rot) / lengthOf(0)).toBeCloseTo(1, 1); // within ~5 %: only the sampling grid differs
+    for (const st of strokes) expect(rotateStroke(st, 77, { x: 0, y: 0 }).widthProfile).toEqual(st.widthProfile);
+  });
+
+  it.each([30, 45, 90, 137, 180, -60, -135, 270])('nothing is clipped at %s degrees (cropped)', (rotation) => {
+    const r = buildStaticSvg({ ...crop, rotation });
+    const n = numbersIn(r.svg);
+    const { x, y, width, height } = r.viewBox;
+    for (let i = 0; i < n.length; i += 2) {
+      // Control points may sit slightly outside the curve, on-curve points may not: allow a small margin.
+      expect(n[i]).toBeGreaterThan(x - 14);
+      expect(n[i]).toBeLessThan(x + width + 14);
+      expect(n[i + 1]).toBeGreaterThan(y - 14);
+      expect(n[i + 1]).toBeLessThan(y + height + 14);
+    }
+  });
+
+  it('turning the whole page (no crop) enlarges the box to the rotated page, so no corner is lost', () => {
+    const r45 = buildStaticSvg({ ...base, rotation: 45 }).viewBox;
+    const expected = (960 + 420) / Math.SQRT2;
+    expect(r45.width).toBeCloseTo(expected, 0);
+    expect(r45.height).toBeCloseTo(expected, 0);
+    const r90 = buildStaticSvg({ ...base, rotation: 90 }).viewBox;
+    expect(r90.width).toBeCloseTo(420, 0);
+    expect(r90.height).toBeCloseTo(960, 0);
+  });
+
+  it('keeps every stroke, in order, and needs no transform attribute', () => {
+    const a = buildStaticSvg(crop).svg;
+    const b = buildStaticSvg({ ...crop, rotation: 33 }).svg;
+    expect(b.match(/<path /g)).toHaveLength(a.match(/<path /g)!.length);
+    expect(b).not.toMatch(/transform=|NaN|Infinity/);
+  });
+
+  it('ignores non-finite and out-of-range values instead of producing broken output', () => {
+    const plain = buildStaticSvg(crop).svg;
+    expect(buildStaticSvg({ ...crop, rotation: NaN }).svg).toBe(plain);
+    expect(buildStaticSvg({ ...crop, rotation: Infinity }).svg).not.toMatch(/NaN|Infinity/);
+    expect(buildStaticSvg({ ...crop, rotation: 1e12 }).svg).not.toMatch(/NaN|Infinity/);
+  });
+
+  it('works for constant-width strokes and for an empty drawing', () => {
+    const c = buildStaticSvg({ ...crop, variableWidth: false, rotation: 60 });
+    expect(c.svg).toContain('stroke-linecap="round"');
+    expect(c.svg).not.toMatch(/NaN/);
+    const e = buildStaticSvg({ ...base, strokes: [], rotation: 90 });
+    expect(e.svg).not.toMatch(/NaN/);
+  });
+
+  it('the animated export rotates the same way and keeps its timing', () => {
+    const plain = buildAnimatedSvg({ ...crop, variableWidth: true });
+    const turned = buildAnimatedSvg({ ...crop, variableWidth: true, rotation: 90 });
+    const sa = buildStaticSvg({ ...crop, rotation: 90 });
+    expect(turned.viewBox.width).toBeCloseTo(sa.viewBox.width, 0);
+    expect(turned.viewBox.height).toBeCloseTo(sa.viewBox.height, 0);
+    expect(turned.timeline).toEqual(plain.timeline); // timing depends on lengths, which rotation does not change
+    expect(turned.svg).not.toBe(plain.svg);
+    expect(turned.svg).not.toMatch(/NaN|Infinity/);
+    expect(turned.svg.match(/<mask /g)).toHaveLength(plain.svg.match(/<mask /g)!.length);
+  });
+
+  it('rotation 0 leaves the animated file unchanged too', () => {
+    expect(buildAnimatedSvg({ ...crop, rotation: 0 }).svg).toBe(buildAnimatedSvg(crop).svg);
   });
 });

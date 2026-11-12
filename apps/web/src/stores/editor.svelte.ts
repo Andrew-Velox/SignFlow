@@ -40,6 +40,7 @@ class Editor {
   stats = $state({ previewMs: 0 });
 
   // Export
+  rotation = $state(0); // degrees, clockwise; applied to every export
   crop = $state(true);
   padding = $state(12);
   pngScale = $state(2);
