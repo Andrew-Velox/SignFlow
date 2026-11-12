@@ -25,11 +25,13 @@ Exports a transparent **static SVG**, an **animated SVG** (strokes drawn one aft
 
 ---
 
-<a href="docs/demo.mp4" align="center">
-  <img src="docs/demo-poster.jpg" alt="SignFlow demo: draw a signature, preview the animation, export SVG" width="720" />
-</a>
+<div align="center">
 
-<sub>Click the image to watch the demo (`docs/demo.mp4`, about 21 MB).</sub>
+<img src="docs/demo.gif" alt="SignFlow demo: draw a signature, preview the animation, export SVG" width="720" />
+
+<sub>[Watch the full-quality video](docs/demo.mp4)</sub>
+
+</div>
 
 ```bash
 npm install
