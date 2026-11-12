@@ -23,6 +23,14 @@ No backend, no accounts, no analytics.
 
 Exports a transparent **static SVG**, an **animated SVG** (strokes drawn one after another, CSS only, no JavaScript) and a **PNG**, with optional rotation.
 
+## Demo
+
+<a href="docs/demo.mp4">
+  <img src="docs/demo-poster.jpg" alt="SignFlow demo: draw a signature, preview the animation, export SVG" width="720" />
+</a>
+
+<sub>Click the image to watch the demo (`docs/demo.mp4`, about 21 MB).</sub>
+
 ```bash
 npm install
 npm test          # engine unit tests
